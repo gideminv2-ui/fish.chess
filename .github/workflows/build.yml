@@ -1,0 +1,56 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Распаковать проект
+        run: unzip -q fish.chess.zip
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Скачать Stockfish для Android
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          mkdir -p sf && cd sf
+          gh release download --repo official-stockfish/Stockfish --pattern '*android*' --dir .
+          ls -la
+          ASSET=$(ls | grep -i 'android' | grep -i 'armv8' | grep -vi 'dotprod' | head -n 1 || true)
+          if [ -z "$ASSET" ]; then ASSET=$(ls | grep -i 'android' | head -n 1); fi
+          echo "Файл: $ASSET"
+          case "$ASSET" in
+            *.tar.gz|*.tgz) tar -xzf "$ASSET" ;;
+            *.tar) tar -xf "$ASSET" ;;
+            *.zip) unzip -o "$ASSET" ;;
+          esac
+          BIN=$(find . -type f -iname 'stockfish*' -size +1M ! -name '*.tar' ! -name '*.zip' ! -name '*.gz' ! -name '*.tgz' | grep -i 'android' | head -n 1 || true)
+          if [ -z "$BIN" ]; then BIN=$(find . -type f -iname 'stockfish*' -size +1M ! -name '*.tar' ! -name '*.zip' ! -name '*.gz' ! -name '*.tgz' | head -n 1); fi
+          echo "Бинарник: $BIN"
+          test -n "$BIN"
+          mkdir -p ../fish.chess/app/src/main/jniLibs/arm64-v8a
+          cp "$BIN" ../fish.chess/app/src/main/jniLibs/arm64-v8a/libstockfish.so
+
+      - name: Собрать APK
+        working-directory: fish.chess
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fish.chess-apk
+          path: fish.chess/app/build/outputs/apk/debug/app-debug.apk
